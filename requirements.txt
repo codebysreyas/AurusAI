@@ -1,0 +1,10 @@
+MetaTrader5
+pandas
+numpy
+requests
+groq
+fredapi
+python-telegram-bot
+apscheduler
+feedparser
+beautifulsoup4
