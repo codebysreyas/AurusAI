@@ -1,0 +1,16 @@
+# secrets
+config.py
+
+# database
+data/signals.db
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+
+# IDE
+.vscode/
+.idea/
