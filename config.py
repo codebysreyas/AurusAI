@@ -13,8 +13,8 @@ NEWS_API_KEY  = "43ce66517f184d0ab4dae32222115913"
 FRED_API_KEY  = "b4ed44dbd1870ce69e013d0498b10221"
 
 # ── TELEGRAM ─────────────────────────────────────────────────
-TELEGRAM_TOKEN   = ""
-TELEGRAM_CHAT_ID = ""
+TELEGRAM_TOKEN   = "8983894184:AAGt1qqj-qPB4Tpjr_mUXb3Ndt3sXTL-T4M"
+TELEGRAM_CHAT_ID = "-1004478677261"
 
 # ── MT5 ──────────────────────────────────────────────────────
 MT5_SYMBOL   = "XAUUSD"
