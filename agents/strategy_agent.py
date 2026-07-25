@@ -5,43 +5,32 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
-from agents.risk_agent      import check  as risk_check
-from agents.risk_agent      import log_signal, check_pending_outcomes
-from agents.macro_agent     import run    as macro_run
-from agents.sentiment_agent import run    as sentiment_run
+from agents.risk_agent      import check as risk_check, log_signal, is_duplicate
+from agents.macro_agent     import run   as macro_run
+from agents.sentiment_agent import run   as sentiment_run
 
 from config import MIN_CONFIDENCE
 
 
-# ── Result dataclass ──────────────────────────────────────────
 @dataclass
 class StrategyDecision:
-    send          : bool
-    score         : int
-    max_score     : int
-    stars         : str
-    signal        : object        # SignalResult or None
-    risk          : object        # RiskDecision
-    macro         : object        # MacroResult
-    sentiment     : object        # SentimentResult
+    send           : bool
+    score          : int
+    max_score      : int
+    stars          : str
+    signal         : object
+    risk           : object
+    macro          : object
+    sentiment      : object
     score_breakdown: dict = field(default_factory=dict)
-    block_reason  : str  = ""
+    block_reason   : str  = ""
 
 
-# ── Stars formatter ───────────────────────────────────────────
 def _stars(score, max_score=5):
-    filled = "★" * score
-    empty  = "☆" * (max_score - score)
-    return filled + empty
+    return "★" * score + "☆" * (max_score - score)
 
 
-# ── Main orchestrator ─────────────────────────────────────────
 def evaluate(signal, current_price=None):
-    """
-    Takes a SignalResult from Price Agent.
-    Runs Risk, Macro, Sentiment agents.
-    Returns StrategyDecision.
-    """
     direction = signal.direction
 
     # ── Step 1: Risk check ────────────────────────────────────
@@ -49,32 +38,45 @@ def evaluate(signal, current_price=None):
     if not risk.allowed:
         print(f"[StrategyAgent] BLOCKED by Risk: {risk.reason}")
         return StrategyDecision(
-            send          =False,
-            score         =0,
-            max_score     =5,
-            stars         =_stars(0),
-            signal        =signal,
-            risk          =risk,
-            macro         =None,
-            sentiment     =None,
-            block_reason  =risk.reason,
+            send         =False,
+            score        =0,
+            max_score    =5,
+            stars        =_stars(0),
+            signal       =signal,
+            risk         =risk,
+            macro        =None,
+            sentiment    =None,
+            block_reason =risk.reason,
         )
 
-    # ── Step 2: Macro check ───────────────────────────────────
+    # ── Step 2: Duplicate check ───────────────────────────────
+    if is_duplicate(signal.strategy):
+        print(f"[StrategyAgent] SKIP duplicate — {signal.strategy} already pending")
+        return StrategyDecision(
+            send         =False,
+            score        =0,
+            max_score    =5,
+            stars        =_stars(0),
+            signal       =signal,
+            risk         =risk,
+            macro        =None,
+            sentiment    =None,
+            block_reason ="Duplicate — already pending",
+        )
+
+    # ── Step 3: Macro check ───────────────────────────────────
     macro = macro_run(signal_direction=direction)
 
-    # ── Step 3: Sentiment check ───────────────────────────────
+    # ── Step 4: Sentiment check ───────────────────────────────
     sentiment = sentiment_run(signal_direction=direction)
 
-    # ── Step 4: Score ─────────────────────────────────────────
-    score      = 0
-    breakdown  = {}
+    # ── Step 5: Score ─────────────────────────────────────────
+    score     = 0
+    breakdown = {}
 
-    # +1 price signal fired (always true here — we already passed filters)
     score += 1
     breakdown["price_signal"] = 1
 
-    # +1 macro agrees
     if macro.blackout:
         breakdown["macro"] = 0
         print(f"[StrategyAgent] Macro blackout — 0 points")
@@ -89,7 +91,6 @@ def evaluate(signal, current_price=None):
         breakdown["macro"] = 0
         print(f"[StrategyAgent] Macro disagrees — +0")
 
-    # +1 sentiment agrees
     sent_agrees = (
         (direction ==  1 and sentiment.vote == "bullish") or
         (direction == -1 and sentiment.vote == "bearish")
@@ -102,7 +103,6 @@ def evaluate(signal, current_price=None):
         breakdown["sentiment"] = 0
         print(f"[StrategyAgent] Sentiment neutral/disagrees — +0")
 
-    # +1 risk is clean (streak < 3, not just allowed)
     if risk.streak < 3:
         score += 1
         breakdown["risk_clean"] = 1
@@ -111,7 +111,6 @@ def evaluate(signal, current_price=None):
         breakdown["risk_clean"] = 0
         print(f"[StrategyAgent] Risk streak={risk.streak} — +0")
 
-    # +1 strategy PF bonus
     if signal.pf >= 1.30:
         score += 1
         breakdown["pf_bonus"] = 1
@@ -120,26 +119,25 @@ def evaluate(signal, current_price=None):
         breakdown["pf_bonus"] = 0
         print(f"[StrategyAgent] PF {signal.pf} < 1.30 — +0")
 
-    # ── Step 5: Decision ──────────────────────────────────────
+    # ── Step 6: Decision ──────────────────────────────────────
     send = score >= MIN_CONFIDENCE and not macro.blackout
-
     print(f"[StrategyAgent] Score={score}/5 {_stars(score)} "
           f"{'SEND' if send else 'SKIP'} — {signal.strategy}")
 
     decision = StrategyDecision(
-        send          =send,
-        score         =score,
-        max_score     =5,
-        stars         =_stars(score),
-        signal        =signal,
-        risk          =risk,
-        macro         =macro,
-        sentiment     =sentiment,
+        send           =send,
+        score          =score,
+        max_score      =5,
+        stars          =_stars(score),
+        signal         =signal,
+        risk           =risk,
+        macro          =macro,
+        sentiment      =sentiment,
         score_breakdown=breakdown,
-        block_reason  ="" if send else f"Score {score} < {MIN_CONFIDENCE}",
+        block_reason   ="" if send else f"Score {score} < {MIN_CONFIDENCE}",
     )
 
-    # ── Step 6: Log to DB if sending ─────────────────────────
+    # ── Step 7: Log to DB if sending ─────────────────────────
     if send:
         signal_id = log_signal(signal)
         print(f"[StrategyAgent] Signal logged — DB id={signal_id}")
@@ -148,28 +146,7 @@ def evaluate(signal, current_price=None):
     return decision
 
 
-# ── Duplicate check ───────────────────────────────────────
-    from agents.risk_agent import is_duplicate
-    if is_duplicate(signal.strategy):
-        print(f"[StrategyAgent] SKIP duplicate — {signal.strategy} already pending")
-        return StrategyDecision(
-            send        =False,
-            score       =0,
-            max_score   =5,
-            stars       =_stars(0),
-            signal      =signal,
-            risk        =risk,
-            macro       =None,
-            sentiment   =None,
-            block_reason="Duplicate — already pending",
-        )
-
-# ── Run all signals ───────────────────────────────────────────
 def run_all(signals, current_price=None):
-    """
-    Evaluate a list of SignalResult objects.
-    Returns list of StrategyDecision where send=True.
-    """
     approved = []
     for sig in signals:
         print(f"\n[StrategyAgent] Evaluating: {sig.strategy}")
@@ -180,11 +157,7 @@ def run_all(signals, current_price=None):
     return approved
 
 
-# ── Test ──────────────────────────────────────────────────────
 if __name__ == "__main__":
-    from datetime import datetime, timezone
-
-    # simulate a signal from price agent
     class FakeSignal:
         strategy      = "Trend Pullback"
         stype         = "trend"
@@ -202,7 +175,6 @@ if __name__ == "__main__":
         stats         = {}
 
     decision = evaluate(FakeSignal())
-
     print(f"\n{'='*55}")
     print(f"Send     : {decision.send}")
     print(f"Score    : {decision.score}/5")
