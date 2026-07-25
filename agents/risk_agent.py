@@ -11,6 +11,21 @@ from config import (
 )
 
 
+def is_duplicate(strategy_name):
+    """
+    Returns True if this strategy already has a pending signal.
+    Prevents same strategy firing every 5 minutes.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c    = conn.cursor()
+    c.execute("""
+        SELECT COUNT(*) FROM signals
+        WHERE strategy = ? AND outcome = 'pending'
+    """, (strategy_name,))
+    count = c.fetchone()[0]
+    conn.close()
+    return count > 0
+
 # ── DB setup ─────────────────────────────────────────────────
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)

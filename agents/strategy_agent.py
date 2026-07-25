@@ -148,6 +148,22 @@ def evaluate(signal, current_price=None):
     return decision
 
 
+# ── Duplicate check ───────────────────────────────────────
+    from agents.risk_agent import is_duplicate
+    if is_duplicate(signal.strategy):
+        print(f"[StrategyAgent] SKIP duplicate — {signal.strategy} already pending")
+        return StrategyDecision(
+            send        =False,
+            score       =0,
+            max_score   =5,
+            stars       =_stars(0),
+            signal      =signal,
+            risk        =risk,
+            macro       =None,
+            sentiment   =None,
+            block_reason="Duplicate — already pending",
+        )
+
 # ── Run all signals ───────────────────────────────────────────
 def run_all(signals, current_price=None):
     """
