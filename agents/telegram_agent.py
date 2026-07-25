@@ -73,9 +73,9 @@ def send_block_alert(reason):
     return send(msg)
 
 
-def send_outcome(strategy, outcome, entry, close_price):
+def send_outcome(strategy, outcome, entry, close_price, direction):
     from utils.formatter import format_outcome
-    msg = format_outcome(strategy, outcome, entry, close_price)
+    msg = format_outcome(strategy, outcome, entry, close_price, direction)
     return send(msg)
 
 

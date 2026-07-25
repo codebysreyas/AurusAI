@@ -134,21 +134,23 @@ def format_block_alert(reason):
     return msg
 
 
-def format_outcome(strategy, outcome, entry, close_price):
+def format_outcome(strategy, outcome, entry, close_price, direction):
     """
-    Format TP/SL hit notification.
+    Format TP/SL hit notification with pips.
+    1 pip = $0.10 movement = 1 price point × 10
     """
-    icon = "✅ TP HIT" if outcome == "win" else "❌ SL HIT"
-    pnl_direction = "+" if outcome == "win" else "-"
-    move = abs(round(close_price - entry, 2))
+    icon      = "✅ TP HIT" if outcome == "win" else "❌ SL HIT"
+    pips      = round(abs(close_price - entry) * 10)
+    pip_sign  = "+" if outcome == "win" else "-"
 
     msg = (
-        f"{icon}\n"
+        f"{icon} — {strategy}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📌 Strategy : {strategy}\n"
-        f"🎯 Entry    : {entry}\n"
-        f"📍 Close    : {close_price}\n"
-        f"💰 Move     : {pnl_direction}${move}\n"
-        f"#AurusAI #XAUUSD"
+        f"📌 Entry  : {entry}\n"
+        f"📍 Close  : {close_price}\n"
+        f"📏 Pips   : {pip_sign}{pips} pips\n"
+        f"🏆 Result : {'WIN' if outcome == 'win' else 'LOSS'}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"\\#AurusAI \\#XAUUSD"
     )
     return msg

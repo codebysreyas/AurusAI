@@ -23,6 +23,7 @@ from agents.telegram_agent import (
     send_block_alert,
     send_outcome,
 )
+from agents.risk_agent import get_current_price
 from config import (
     SCAN_INTERVAL_MINUTES,
     MAX_LOSING_STREAK,
@@ -57,18 +58,26 @@ def scan():
         return
 
     # ── step 2: check pending outcomes ────────────────────────
-    if frames:
-        # get current price from H1 latest close
-        try:
-            h1 = frames.get("H1")
-            if h1 is not None and len(h1) > 0:
-                current_price = float(h1["close"].iloc[-1])
-                closed = check_pending_outcomes(current_price)
-                for (sid, strategy, outcome) in closed:
-                    entry_price = h1["close"].iloc[-2]
-                    send_outcome(strategy, outcome, entry_price, current_price)
-        except Exception as e:
-            print(f"[AurusAI] Outcome check error: {e}")
+    try:
+        from agents.risk_agent import get_current_price
+        current_price = get_current_price()
+        if current_price:
+            print(f"[AurusAI] Current price: {current_price}")
+            closed = check_pending_outcomes(current_price)
+            for (sid, strategy, outcome) in closed:
+                # fetch entry from DB
+                import sqlite3
+                from config import DB_PATH
+                conn = sqlite3.connect(DB_PATH)
+                c    = conn.cursor()
+                c.execute("SELECT entry, direction FROM signals WHERE id=?", (sid,))
+                row  = c.fetchone()
+                conn.close()
+                if row:
+                    entry, direction = row
+                    send_outcome(strategy, outcome, entry, current_price, direction)
+    except Exception as e:
+        print(f"[AurusAI] Outcome check error: {e}")
 
     # ── step 3: check if bot is paused ────────────────────────
     streak = get_losing_streak()

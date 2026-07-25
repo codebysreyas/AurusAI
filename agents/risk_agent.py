@@ -240,6 +240,20 @@ def check_pending_outcomes(current_price):
             print(f"[RiskAgent] Signal #{sid} {strategy} → {outcome.upper()} at {current_price}")
     return closed
 
+def get_current_price():
+    """
+    Fetch current XAUUSD bid price directly from MT5.
+    Returns float or None.
+    """
+    import MetaTrader5 as mt5
+    from config import MT5_SYMBOL
+    if not mt5.initialize():
+        return None
+    tick = mt5.symbol_info_tick(MT5_SYMBOL)
+    mt5.shutdown()
+    if tick is None:
+        return None
+    return float(tick.bid)
 
 # ── Test ──────────────────────────────────────────────────────
 if __name__ == "__main__":
