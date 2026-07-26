@@ -255,6 +255,29 @@ def get_current_price():
         return None
     return float(tick.bid)
 
+def expire_old_signals(hours=24):
+    """
+    Mark pending signals older than X hours as cancelled.
+    Called at the start of each scan cycle.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c    = conn.cursor()
+    c.execute("""
+        UPDATE signals
+        SET outcome = 'cancelled', close_time = ?
+        WHERE outcome = 'pending'
+        AND datetime(timestamp) <= datetime('now', ? )
+    """, (
+        datetime.now(timezone.utc).isoformat(),
+        f'-{hours} hours'
+    ))
+    expired = c.rowcount
+    conn.commit()
+    conn.close()
+    if expired > 0:
+        print(f"[RiskAgent] {expired} signal(s) expired after {hours}h")
+    return expired
+
 # ── Test ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
