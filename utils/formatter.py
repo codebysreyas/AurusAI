@@ -63,7 +63,7 @@ def format_signal(decision):
         f"{direction_emoji} *{direction_text} XAUUSD*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 *Strategy* : {sig.strategy}\n"
-        f"🎯 *Entry*    : {sig.entry}\n"
+        f"🎯 *Entry Zone*: {round(sig.entry - sig.atr * 0.1, 2)} – {round(sig.entry + sig.atr * 0.1, 2)}\n"
         f"🛑 *SL*       : {sig.sl}\n"
         f"✅ *TP*       : {sig.tp}\n"
         f"📏 *RR*       : 1:{sig.rr}\n"

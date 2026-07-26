@@ -3,6 +3,29 @@ import os
 import time
 from datetime import datetime, timezone
 
+def is_market_open():
+    """
+    Gold market hours: Sunday 21:00 UTC to Friday 21:00 UTC.
+    Returns False on weekends and outside trading hours.
+    """
+    now     = datetime.now(timezone.utc)
+    weekday = now.weekday()  # 0=Monday, 6=Sunday
+    hour    = now.hour
+
+    # Saturday — always closed
+    if weekday == 5:
+        return False
+
+    # Sunday — closed until 21:00 UTC
+    if weekday == 6 and hour < 21:
+        return False
+
+    # Friday — closes at 21:00 UTC
+    if weekday == 4 and hour >= 21:
+        return False
+
+    return True
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron       import CronTrigger
 from apscheduler.triggers.interval   import IntervalTrigger
@@ -36,6 +59,15 @@ _last_block_alert_sent = False   # avoid spamming block alerts
 
 # ── main scan cycle ───────────────────────────────────────────
 def scan():
+    now = datetime.now(timezone.utc)
+    print(f"\n{'='*60}")
+    print(f"[AurusAI] Scan started — {now.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    print(f"{'='*60}")
+
+    # ── Market closed check ───────────────────────────────────
+    if not is_market_open():
+        print(f"[AurusAI] Market closed — skipping scan")
+        return
     """
     Runs every SCAN_INTERVAL_MINUTES minutes.
     1. Fetch live price + run strategies
