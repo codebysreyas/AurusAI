@@ -1,24 +1,18 @@
-# ============================================================
-#  AurusAI — config.py
-# ============================================================
+import os
 
 # ── GROQ ─────────────────────────────────────────────────────
-GROQ_API_KEY  = "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"
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL    = "llama-3.3-70b-versatile"
 
 # ── NEWS API ─────────────────────────────────────────────────
-NEWS_API_KEY  = "43ce66517f184d0ab4dae32222115913"
+NEWS_API_KEY  = os.environ.get("NEWS_API_KEY", "")
 
 # ── FRED API ─────────────────────────────────────────────────
-FRED_API_KEY  = "b4ed44dbd1870ce69e013d0498b10221"
+FRED_API_KEY  = os.environ.get("FRED_API_KEY", "")
 
 # ── TELEGRAM ─────────────────────────────────────────────────
-TELEGRAM_TOKEN   = "8983894184:AAGt1qqj-qPB4Tpjr_mUXb3Ndt3sXTL-T4M"
-TELEGRAM_CHAT_ID = "-1004478677261"
-
-# ── MT5 ──────────────────────────────────────────────────────
-MT5_SYMBOL   = "XAUUSD"
-MT5_BARS     = 500
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ── SIGNAL QUALITY THRESHOLDS ────────────────────────────────
 MIN_TP_MOVE        = 10.0
@@ -32,7 +26,6 @@ MAX_SIGNALS_PER_DAY = 3
 MIN_CONFIDENCE      = 3
 
 # ── STRATEGIES ───────────────────────────────────────────────
-# (name, rr, filter_run, timeframe, stype, pf)
 STRATEGIES = [
     ("Trend Pullback",               4.0, "D", "H1",  "trend",    1.609),
     ("Trend Acceleration",           4.0, "D", "H1",  "trend",    1.486),
@@ -45,8 +38,8 @@ STRATEGIES = [
 ]
 
 # ── SCHEDULER ────────────────────────────────────────────────
-SCAN_INTERVAL_MINUTES        = 5
-NEWS_FETCH_INTERVAL_MINUTES  = 60
+SCAN_INTERVAL_MINUTES       = 5
+NEWS_FETCH_INTERVAL_MINUTES = 60
 
 # ── DATABASE ─────────────────────────────────────────────────
 DB_PATH = "data/signals.db"
