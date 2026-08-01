@@ -177,21 +177,33 @@ def daily_recap():
 
 
 # ── startup message ───────────────────────────────────────────
+# ── startup message ───────────────────────────────────────────
 def startup():
     from agents.telegram_agent import send
     now = datetime.now(timezone.utc)
-    msg = (
-        f"🤖 *AurusAI Started*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🕐 {now.strftime('%Y-%m-%d %H:%M')} UTC\n"
-        f"📡 Scanning every {SCAN_INTERVAL_MINUTES} minutes\n"
-        f"📊 8 strategies active\n"
-        f"✅ All systems operational\n"
-        f"\\#AurusAI"
-    )
-    send(msg)
-    print(f"[AurusAI] Startup message sent")
 
+    msg = (
+        f"◉ *AURUS AI*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"*SYSTEM INITIALIZED*\n\n"
+        f"✓ Quantitative Engine Online\n"
+        f"✓ Multi-Strategy Framework Active\n"
+        f"✓ Market Data Connected\n"
+        f"✓ Risk Controls Enabled\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"`UTC           {now.strftime('%Y-%m-%d %H:%M')}`\n"
+        f"`SCAN CYCLE    Every {SCAN_INTERVAL_MINUTES} Minutes`\n"
+        f"`STRATEGIES    8 Active`\n"
+        f"`RISK ENGINE   Enabled`\n"
+        f"`MARKET        XAUUSD`\n"
+        f"`STATUS        Monitoring`\n\n"
+        f"Scanning global markets.\n"
+        f"Filtering institutional-grade opportunities.\n"
+        f"Awaiting confirmed execution conditions."
+    )
+
+    send(msg)
+    print("[AurusAI] Startup message sent")
 
 # ── main ──────────────────────────────────────────────────────
 if __name__ == "__main__":

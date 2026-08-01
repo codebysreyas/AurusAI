@@ -91,6 +91,14 @@ def add_all_indicators(df):
     return df
 
 
+def add_trend_bias(df):
+    df = df.copy()
+    df["trend_bias"] = 0
+    df.loc[df["ema50"] > df["ema200"], "trend_bias"] =  1
+    df.loc[df["ema50"] < df["ema200"], "trend_bias"] = -1
+    return df
+
+
 def get_summary_stats(df):
     if len(df) < 50:
         return {}
@@ -107,7 +115,6 @@ def get_summary_stats(df):
 
     def safe(val):
         try:
-            if val is None: return None
             f = float(val)
             return None if np.isnan(f) else round(f, 4)
         except:

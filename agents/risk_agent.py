@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -242,18 +242,20 @@ def check_pending_outcomes(current_price):
 
 def get_current_price():
     """
-    Fetch current XAUUSD bid price directly from MT5.
+    Fetch current XAUUSD price via yfinance.
     Returns float or None.
     """
-    import MetaTrader5 as mt5
-    from config import MT5_SYMBOL
-    if not mt5.initialize():
+    try:
+        import yfinance as yf
+        df = yf.download("GC=F", period="1d", interval="1m",
+                         auto_adjust=True, progress=False, timeout=10)
+        if df.empty:
+            return None
+        df.columns = [c.lower() for c in df.columns]
+        return float(df["close"].iloc[-1])
+    except Exception as e:
+        print(f"[RiskAgent] Price fetch error: {e}")
         return None
-    tick = mt5.symbol_info_tick(MT5_SYMBOL)
-    mt5.shutdown()
-    if tick is None:
-        return None
-    return float(tick.bid)
 
 def expire_old_signals(hours=24):
     """

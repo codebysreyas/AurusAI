@@ -2,90 +2,117 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import MetaTrader5 as mt5
+import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from utils.indicators import add_all_indicators, get_summary_stats
-from utils.strategies import (
-    trend_pullback, trend_acceleration,
-    trend_volatility_expansion, trend_following_low_dd,
-    wick_rejection_reversal, liquidity_sweep_continuation,
-    vwap_reversion, mean_reversion,
+from utils.strategies  import (
+    trend_pullback,
+    trend_acceleration,
+    trend_volatility_expansion,
+    trend_following_low_dd,
+    wick_rejection_reversal,
+    liquidity_sweep_continuation,
+    vwap_reversion,
+    mean_reversion,
 )
 from utils.filters import check_all_filters
-from config import STRATEGIES, MT5_SYMBOL, MT5_BARS
+from config import STRATEGIES
 
 
-# ── Data class ───────────────────────────────────────────────
+# ── Signal dataclass ──────────────────────────────────────────
 @dataclass
 class SignalResult:
-    strategy    : str
-    stype       : str
-    direction   : int
-    entry       : float
-    sl          : float
-    tp          : float
-    rr          : float
-    atr         : float
+    strategy     : str
+    stype        : str
+    direction    : int
+    entry        : float
+    sl           : float
+    tp           : float
+    rr           : float
+    atr          : float
     expected_move: float
-    reason      : str
-    filter_run  : str
-    pf          : float
-    timestamp   : datetime = field(default_factory=datetime.utcnow)
-    stats       : dict     = field(default_factory=dict)
+    reason       : str
+    filter_run   : str
+    pf           : float
+    timestamp    : datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    stats        : dict     = field(default_factory=dict)
 
 
-# ── MT5 connection ────────────────────────────────────────────
-def connect_mt5():
-    if not mt5.initialize():
-        print(f"[PriceAgent] MT5 init failed: {mt5.last_error()}")
-        return False
-    print(f"[PriceAgent] MT5 connected — {mt5.terminal_info().name}")
-    return True
-
-
-def disconnect_mt5():
-    mt5.shutdown()
-
-
-# ── Fetch OHLCV ───────────────────────────────────────────────
-TF_MAP = {
-    "M5":  mt5.TIMEFRAME_M5,
-    "M15": mt5.TIMEFRAME_M15,
-    "H1":  mt5.TIMEFRAME_H1,
-    "H4":  mt5.TIMEFRAME_H4,
+# ── Timeframe map ─────────────────────────────────────────────
+# yfinance interval : (period, internal key)
+TF_CONFIG = {
+    "M5" : ("5d",  "5m"),
+    "M15": ("30d", "15m"),
+    "H1" : ("60d", "1h"),
+    "H4" : ("60d", "1h"),   # yfinance has no 4h — resample from 1h
 }
 
-def fetch_data():
+
+# ── Fetch data ────────────────────────────────────────────────
+def fetch_data(ticker="GC=F"):
     frames = {}
-    for tf_name, tf_const in TF_MAP.items():
-        rates = mt5.copy_rates_from_pos(MT5_SYMBOL, tf_const, 0, MT5_BARS)
-        if rates is None or len(rates) == 0:
-            print(f"[PriceAgent] No data for {tf_name}: {mt5.last_error()}")
-            continue
-        df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        df.set_index("time", inplace=True)
-        df.rename(columns={
-            "open": "open", "high": "high",
-            "low": "low",   "close": "close",
-            "tick_volume": "volume"
-        }, inplace=True)
-        df = df[["open","high","low","close","volume"]].copy()
-        frames[tf_name] = df
-        print(f"[PriceAgent] {tf_name}: {len(df)} bars fetched")
+    try:
+        # fetch M5
+        df = yf.download(ticker, period="5d", interval="5m",
+                         auto_adjust=True, progress=False, timeout=20)
+        if not df.empty:
+            df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
+            df = df[["open","high","low","close","volume"]].dropna()
+            frames["M5"] = df.tail(500)
+            print(f"[PriceAgent] M5 : {len(frames['M5'])} bars")
+
+        # fetch M15
+        df = yf.download(ticker, period="30d", interval="15m",
+                         auto_adjust=True, progress=False, timeout=20)
+        if not df.empty:
+            df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
+            df = df[["open","high","low","close","volume"]].dropna()
+            frames["M15"] = df.tail(500)
+            print(f"[PriceAgent] M15: {len(frames['M15'])} bars")
+
+        # fetch H1
+        df = yf.download(ticker, period="60d", interval="1h",
+                         auto_adjust=True, progress=False, timeout=20)
+        if not df.empty:
+            df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
+            df = df[["open","high","low","close","volume"]].dropna()
+            h1 = df.tail(500)
+            frames["H1"] = h1
+            print(f"[PriceAgent] H1 : {len(frames['H1'])} bars")
+
+            # resample H1 to H4
+            h4 = df.resample("4h").agg(
+                open =("open",  "first"),
+                high =("high",  "max"),
+                low  =("low",   "min"),
+                close=("close", "last"),
+                volume=("volume","sum"),
+            ).dropna().tail(500)
+            frames["H4"] = h4
+            print(f"[PriceAgent] H4 : {len(frames['H4'])} bars")
+
+    except Exception as e:
+        print(f"[PriceAgent] Fetch error: {e}")
+
     return frames
 
 
 # ── Prepare indicators ────────────────────────────────────────
 def prepare_frames(frames):
-    return {tf: add_all_indicators(df) for tf, df in frames.items()}
+    prepared = {}
+    for tf, df in frames.items():
+        try:
+            prepared[tf] = add_all_indicators(df)
+        except Exception as e:
+            print(f"[PriceAgent] Indicator error {tf}: {e}")
+    return prepared
 
 
-# ── Run all strategies ────────────────────────────────────────
+# ── Run strategies ────────────────────────────────────────────
 def run_strategies(frames):
     signals = []
 
@@ -95,7 +122,7 @@ def run_strategies(frames):
     df_h4  = frames.get("H4")
 
     if df_h1 is None or df_m15 is None:
-        print("[PriceAgent] Missing required timeframes H1/M15")
+        print("[PriceAgent] Missing required timeframes")
         return signals
 
     strategy_calls = [
@@ -129,7 +156,7 @@ def run_strategies(frames):
             df_entry, latest_idx, direction, rr, stype
         )
         if not passed:
-            print(f"[PriceAgent] {name} blocked by filter: {filter_reason}")
+            print(f"[PriceAgent] {name} filtered: {filter_reason}")
             continue
 
         latest = df_entry.iloc[-1]
@@ -162,19 +189,35 @@ def run_strategies(frames):
     return signals
 
 
-# ── Main entry point ──────────────────────────────────────────
-def run():
-    if not connect_mt5():
-        return [], {}
+# ── Get current price ─────────────────────────────────────────
+def get_live_price(ticker="GC=F"):
+    """
+    Fetch latest price for outcome tracking.
+    Returns float or None.
+    """
     try:
-        print(f"[PriceAgent] Fetching {MT5_SYMBOL}...")
-        frames   = fetch_data()
-        prepared = prepare_frames(frames)
-        signals  = run_strategies(prepared)
-        print(f"[PriceAgent] {len(signals)} signal(s) found")
-        return signals, prepared
-    finally:
-        disconnect_mt5()
+        df = yf.download(ticker, period="1d", interval="1m",
+                         auto_adjust=True, progress=False, timeout=10)
+        if df.empty:
+            return None
+        df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
+        return float(df["close"].iloc[-1])
+    except Exception as e:
+        print(f"[PriceAgent] Live price error: {e}")
+        return None
+
+
+# ── Main entry point ──────────────────────────────────────────
+def run(ticker="GC=F"):
+    print(f"[PriceAgent] Fetching {ticker} via yfinance...")
+    frames   = fetch_data(ticker)
+    if not frames:
+        print("[PriceAgent] No data fetched")
+        return [], {}
+    prepared = prepare_frames(frames)
+    signals  = run_strategies(prepared)
+    print(f"[PriceAgent] {len(signals)} signal(s) found")
+    return signals, prepared
 
 
 # ── Test ──────────────────────────────────────────────────────
@@ -194,5 +237,4 @@ if __name__ == "__main__":
         print(f"RSI      : {s.stats.get('rsi')}")
         print(f"ADX      : {s.stats.get('adx')}")
         print(f"Sharpe   : {s.stats.get('sharpe')}")
-        print(f"Ann.Vol  : {s.stats.get('ann_volatility')}%")
         print(f"7d Trend : {s.stats.get('trend_7d_pct')}%")
