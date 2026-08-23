@@ -1,3 +1,7 @@
+# ============================================================
+#  AurusAI — agents/risk_agent.py
+# ============================================================
+
 import sqlite3
 import os
 import sys
@@ -5,29 +9,47 @@ from datetime import datetime, date, timezone
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import (
-    DB_PATH, MAX_LOSING_STREAK,
-    MAX_SIGNALS_PER_DAY, MIN_TP_MOVE
-)
+from config import DB_PATH, MAX_LOSING_STREAK, MAX_SIGNALS_PER_DAY, MIN_TP_MOVE
 
 
-def is_duplicate(strategy_name):
-    """
-    Returns True if this strategy already has a pending signal.
-    Prevents same strategy firing every 5 minutes.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    c    = conn.cursor()
-    c.execute("""
-        SELECT COUNT(*) FROM signals
-        WHERE strategy = ? AND outcome = 'pending'
-    """, (strategy_name,))
-    count = c.fetchone()[0]
-    conn.close()
-    return count > 0
+# ── S3 ────────────────────────────────────────────────────────
+S3_BUCKET = os.environ.get("S3_BUCKET", "")
+S3_KEY    = "aurusai/signals.db"
 
-# ── DB setup ─────────────────────────────────────────────────
+
+def _s3_client():
+    import boto3
+    return boto3.client("s3")
+
+
+def backup_db_to_s3():
+    if not S3_BUCKET:
+        return
+    try:
+        _s3_client().upload_file(DB_PATH, S3_BUCKET, S3_KEY)
+        print(f"[RiskAgent] DB backed up to S3")
+    except Exception as e:
+        print(f"[RiskAgent] S3 backup error: {e}")
+
+
+def restore_db_from_s3():
+    if not S3_BUCKET:
+        return
+    try:
+        from botocore.exceptions import ClientError
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        _s3_client().download_file(S3_BUCKET, S3_KEY, DB_PATH)
+        print(f"[RiskAgent] DB restored from S3")
+    except Exception as e:
+        if "404" in str(e) or "NoSuchKey" in str(e):
+            print(f"[RiskAgent] No S3 backup found — starting fresh")
+        else:
+            print(f"[RiskAgent] S3 restore error: {e}")
+
+
+# ── DB setup ──────────────────────────────────────────────────
 def init_db():
+    restore_db_from_s3()
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
@@ -69,66 +91,53 @@ def log_signal(sig):
     conn.commit()
     signal_id = c.lastrowid
     conn.close()
+    backup_db_to_s3()
     return signal_id
 
 
 # ── Update outcome ────────────────────────────────────────────
 def update_outcome(signal_id, outcome, close_price):
-    """
-    outcome: 'win' | 'loss' | 'cancelled'
-    Called externally when price hits TP or SL.
-    """
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
     c.execute("""
         UPDATE signals
         SET outcome=?, close_price=?, close_time=?
         WHERE id=?
-    """, (outcome, close_price, datetime.utcnow().isoformat(), signal_id))
+    """, (outcome, close_price, datetime.now(timezone.utc).isoformat(), signal_id))
     conn.commit()
     conn.close()
+    backup_db_to_s3()
 
 
 # ── Stats ─────────────────────────────────────────────────────
 def get_today_count():
-    """Number of signals sent today."""
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
-    c.execute("""
-        SELECT COUNT(*) FROM signals
-        WHERE DATE(timestamp) = ?
-    """, (date.today().isoformat(),))
+    c.execute("SELECT COUNT(*) FROM signals WHERE DATE(timestamp) = ?",
+              (date.today().isoformat(),))
     count = c.fetchone()[0]
     conn.close()
     return count
 
 
 def get_losing_streak():
-    """
-    Count consecutive losses from the most recent closed signals.
-    Pending signals are ignored.
-    """
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
     c.execute("""
         SELECT outcome FROM signals
         WHERE outcome IN ('win','loss')
-        ORDER BY id DESC
-        LIMIT 20
+        ORDER BY id DESC LIMIT 20
     """)
     rows   = c.fetchall()
     conn.close()
     streak = 0
     for (outcome,) in rows:
-        if outcome == "loss":
-            streak += 1
-        else:
-            break
+        if outcome == "loss": streak += 1
+        else: break
     return streak
 
 
 def get_pending_signals():
-    """Return all signals still pending outcome."""
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
     c.execute("""
@@ -142,17 +151,15 @@ def get_pending_signals():
 
 
 def get_daily_summary():
-    """Stats for today's signals — used in daily recap."""
     conn = sqlite3.connect(DB_PATH)
     c    = conn.cursor()
     c.execute("""
         SELECT
-            COUNT(*)                                      AS total,
-            SUM(CASE WHEN outcome='win'  THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) AS losses,
+            COUNT(*) AS total,
+            SUM(CASE WHEN outcome='win'     THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN outcome='loss'    THEN 1 ELSE 0 END) AS losses,
             SUM(CASE WHEN outcome='pending' THEN 1 ELSE 0 END) AS pending
-        FROM signals
-        WHERE DATE(timestamp) = ?
+        FROM signals WHERE DATE(timestamp) = ?
     """, (date.today().isoformat(),))
     row = c.fetchone()
     conn.close()
@@ -166,64 +173,39 @@ def get_daily_summary():
     }
 
 
-# ── Main gate ─────────────────────────────────────────────────
-@dataclass
-class RiskDecision:
-    allowed : bool
-    reason  : str
-    streak  : int
-    today   : int
+# ── Duplicate check ───────────────────────────────────────────
+def is_duplicate(strategy_name):
+    conn = sqlite3.connect(DB_PATH)
+    c    = conn.cursor()
+    c.execute("""
+        SELECT COUNT(*) FROM signals
+        WHERE strategy = ? AND outcome = 'pending'
+    """, (strategy_name,))
+    count = c.fetchone()[0]
+    conn.close()
+    return count > 0
 
 
-def check(sig):
-    """
-    Main entry point. Takes a SignalResult, returns RiskDecision.
-    """
-    streak = get_losing_streak()
-    today  = get_today_count()
-
-    # 1. Losing streak breaker
-    if streak >= MAX_LOSING_STREAK:
-        return RiskDecision(
-            allowed=False,
-            reason =f"Losing streak {streak} >= {MAX_LOSING_STREAK} — paused",
-            streak =streak,
-            today  =today,
-        )
-
-    # 2. Daily signal cap
-    if today >= MAX_SIGNALS_PER_DAY:
-        return RiskDecision(
-            allowed=False,
-            reason =f"Daily cap reached: {today}/{MAX_SIGNALS_PER_DAY} signals sent",
-            streak =streak,
-            today  =today,
-        )
-
-    # 3. Minimum TP move
-    if sig.expected_move < MIN_TP_MOVE:
-        return RiskDecision(
-            allowed=False,
-            reason =f"TP move ${sig.expected_move} < minimum ${MIN_TP_MOVE}",
-            streak =streak,
-            today  =today,
-        )
-
-    return RiskDecision(
-        allowed=True,
-        reason =f"Risk OK — streak={streak} today={today}/{MAX_SIGNALS_PER_DAY}",
-        streak =streak,
-        today  =today,
-    )
+# ── Expire old signals ────────────────────────────────────────
+def expire_old_signals(hours=24):
+    conn = sqlite3.connect(DB_PATH)
+    c    = conn.cursor()
+    c.execute("""
+        UPDATE signals
+        SET outcome = 'cancelled', close_time = ?
+        WHERE outcome = 'pending'
+        AND datetime(timestamp) <= datetime('now', ?)
+    """, (datetime.now(timezone.utc).isoformat(), f'-{hours} hours'))
+    expired = c.rowcount
+    conn.commit()
+    conn.close()
+    if expired > 0:
+        print(f"[RiskAgent] {expired} signal(s) expired after {hours}h")
+    return expired
 
 
-# ── Outcome checker ───────────────────────────────────────────
+# ── Pending outcome checker ───────────────────────────────────
 def check_pending_outcomes(current_price):
-    """
-    Call this every scan cycle with current XAUUSD price.
-    Automatically marks pending signals as win or loss
-    if price has crossed TP or SL.
-    """
     pending = get_pending_signals()
     closed  = []
     for (sid, strategy, direction, entry, sl, tp) in pending:
@@ -240,51 +222,66 @@ def check_pending_outcomes(current_price):
             print(f"[RiskAgent] Signal #{sid} {strategy} → {outcome.upper()} at {current_price}")
     return closed
 
+
+# ── Current price ─────────────────────────────────────────────
 def get_current_price():
-    """
-    Fetch current XAUUSD price via yfinance.
-    Returns float or None.
-    """
     try:
-        import yfinance as yf
-        df = yf.download("GC=F", period="1d", interval="1m",
-                         auto_adjust=True, progress=False, timeout=10)
-        if df.empty:
+        import MetaTrader5 as mt5
+        from config import MT5_SYMBOL if hasattr(__import__('config'), 'MT5_SYMBOL') else None
+        symbol = os.environ.get("MT5_SYMBOL", "XAUUSD")
+        if not mt5.initialize():
             return None
-        df.columns = [c.lower() for c in df.columns]
-        return float(df["close"].iloc[-1])
+        tick = mt5.symbol_info_tick(symbol)
+        mt5.shutdown()
+        if tick is None:
+            return None
+        return float(tick.bid)
     except Exception as e:
         print(f"[RiskAgent] Price fetch error: {e}")
         return None
 
-def expire_old_signals(hours=24):
-    """
-    Mark pending signals older than X hours as cancelled.
-    Called at the start of each scan cycle.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    c    = conn.cursor()
-    c.execute("""
-        UPDATE signals
-        SET outcome = 'cancelled', close_time = ?
-        WHERE outcome = 'pending'
-        AND datetime(timestamp) <= datetime('now', ? )
-    """, (
-        datetime.now(timezone.utc).isoformat(),
-        f'-{hours} hours'
-    ))
-    expired = c.rowcount
-    conn.commit()
-    conn.close()
-    if expired > 0:
-        print(f"[RiskAgent] {expired} signal(s) expired after {hours}h")
-    return expired
+
+# ── Risk gate ─────────────────────────────────────────────────
+@dataclass
+class RiskDecision:
+    allowed : bool
+    reason  : str
+    streak  : int
+    today   : int
+
+
+def check(sig):
+    streak = get_losing_streak()
+    today  = get_today_count()
+
+    if streak >= MAX_LOSING_STREAK:
+        return RiskDecision(
+            allowed=False,
+            reason =f"Losing streak {streak} >= {MAX_LOSING_STREAK} — paused",
+            streak =streak, today=today)
+
+    if today >= MAX_SIGNALS_PER_DAY:
+        return RiskDecision(
+            allowed=False,
+            reason =f"Daily cap: {today}/{MAX_SIGNALS_PER_DAY}",
+            streak =streak, today=today)
+
+    if sig.expected_move < MIN_TP_MOVE:
+        return RiskDecision(
+            allowed=False,
+            reason =f"TP move ${sig.expected_move} < ${MIN_TP_MOVE}",
+            streak =streak, today=today)
+
+    return RiskDecision(
+        allowed=True,
+        reason =f"Risk OK — streak={streak} today={today}/{MAX_SIGNALS_PER_DAY}",
+        streak =streak, today=today)
+
 
 # ── Test ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
 
-    # simulate a signal object for testing
     class FakeSig:
         strategy      = "Trend Pullback"
         stype         = "trend"
@@ -294,13 +291,11 @@ if __name__ == "__main__":
         tp            = 2405.00
         rr            = 4.0
         expected_move = 60.0
-        timestamp     = datetime.utcnow()
+        timestamp     = datetime.now(timezone.utc)
 
     decision = check(FakeSig())
     print(f"\n[RiskAgent] Decision: {'ALLOW' if decision.allowed else 'BLOCK'}")
     print(f"[RiskAgent] Reason  : {decision.reason}")
     print(f"[RiskAgent] Streak  : {decision.streak}")
     print(f"[RiskAgent] Today   : {decision.today}")
-
-    summary = get_daily_summary()
-    print(f"\n[RiskAgent] Daily summary: {summary}")
+    print(f"\n[RiskAgent] Daily summary: {get_daily_summary()}")

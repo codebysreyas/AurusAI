@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv()
+
 import sys
 import os
 import sqlite3
@@ -9,7 +10,6 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron       import CronTrigger
 from apscheduler.triggers.interval   import IntervalTrigger
 
-# ── agent imports ─────────────────────────────────────────────
 from agents.price_agent    import run     as price_run
 from agents.strategy_agent import run_all as strategy_run
 from agents.risk_agent     import (
@@ -38,39 +38,28 @@ _last_block_alert_sent = False
 _last_price            = None
 
 
-# ── market hours check ────────────────────────────────────────
+# ── market hours ──────────────────────────────────────────────
 def is_market_open():
-    """
-    Gold market: Sunday 21:00 UTC to Friday 21:00 UTC.
-    """
     now     = datetime.now(timezone.utc)
-    weekday = now.weekday()  # 0=Monday 6=Sunday
+    weekday = now.weekday()
     hour    = now.hour
-
-    if weekday == 5:                      # Saturday — always closed
-        return False
-    if weekday == 6 and hour < 21:        # Sunday before 21:00 UTC
-        return False
-    if weekday == 4 and hour >= 21:       # Friday after 21:00 UTC
-        return False
+    if weekday == 5:                 return False
+    if weekday == 6 and hour < 21:  return False
+    if weekday == 4 and hour >= 21: return False
     return True
 
 
 # ── stale price detection ─────────────────────────────────────
 def is_stale_price(current_price):
-    """
-    Returns True if price hasn't changed from last scan.
-    Indicates MT5 freeze or disconnect.
-    """
     global _last_price
     if _last_price is not None and current_price == _last_price:
-        print(f"[AurusAI] Warning: price unchanged from last scan ({current_price}) — possible stale data")
+        print(f"[AurusAI] Warning: stale price detected ({current_price})")
         return True
     _last_price = current_price
     return False
 
 
-# ── main scan cycle ───────────────────────────────────────────
+# ── scan ──────────────────────────────────────────────────────
 def scan():
     now = datetime.now(timezone.utc)
     print(f"\n{'='*60}")
@@ -79,15 +68,15 @@ def scan():
 
     global _last_block_alert_sent
 
-    # ── market closed check ───────────────────────────────────
+    # market closed
     if not is_market_open():
         print(f"[AurusAI] Market closed — skipping scan")
         return
 
-    # ── expire old signals ────────────────────────────────────
+    # expire old signals
     expire_old_signals(hours=24)
 
-    # ── current price + stale check ───────────────────────────
+    # current price
     current_price = get_current_price()
     if not current_price:
         print(f"[AurusAI] Could not fetch current price — skipping scan")
@@ -96,10 +85,10 @@ def scan():
     print(f"[AurusAI] Current price: {current_price}")
 
     if is_stale_price(current_price):
-        print(f"[AurusAI] Stale price detected — skipping scan")
+        print(f"[AurusAI] Stale price — skipping scan")
         return
 
-    # ── check pending outcomes ────────────────────────────────
+    # check pending outcomes
     try:
         closed = check_pending_outcomes(current_price)
         for (sid, strategy, outcome) in closed:
@@ -114,7 +103,7 @@ def scan():
     except Exception as e:
         print(f"[AurusAI] Outcome check error: {e}")
 
-    # ── check if bot is paused ────────────────────────────────
+    # streak check
     streak = get_losing_streak()
     if streak >= MAX_LOSING_STREAK:
         if not _last_block_alert_sent:
@@ -129,7 +118,7 @@ def scan():
     if streak < MAX_LOSING_STREAK:
         _last_block_alert_sent = False
 
-    # ── get live price signals ────────────────────────────────
+    # price signals
     try:
         signals, frames = price_run()
     except Exception as e:
@@ -140,7 +129,7 @@ def scan():
         print(f"[AurusAI] No signals from Price Agent")
         return
 
-    # ── evaluate signals ──────────────────────────────────────
+    # evaluate
     try:
         approved = strategy_run(signals)
     except Exception as e:
@@ -151,7 +140,7 @@ def scan():
         print(f"[AurusAI] No signals approved this cycle")
         return
 
-    # ── send approved signals ─────────────────────────────────
+    # send
     for decision in approved:
         try:
             ok = send_signal(decision)
@@ -178,34 +167,22 @@ def daily_recap():
         print(f"[AurusAI] Daily recap error: {e}")
 
 
-# ── startup message ───────────────────────────────────────────
-# ── startup message ───────────────────────────────────────────
+# ── startup ───────────────────────────────────────────────────
 def startup():
     from agents.telegram_agent import send
     now = datetime.now(timezone.utc)
-
     msg = (
-        f"◉ *AURUS AI*\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"*SYSTEM INITIALIZED*\n\n"
-        f"✓ Quantitative Engine Online\n"
-        f"✓ Multi-Strategy Framework Active\n"
-        f"✓ Market Data Connected\n"
-        f"✓ Risk Controls Enabled\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"`UTC           {now.strftime('%Y-%m-%d %H:%M')}`\n"
-        f"`SCAN CYCLE    Every {SCAN_INTERVAL_MINUTES} Minutes`\n"
-        f"`STRATEGIES    8 Active`\n"
-        f"`RISK ENGINE   Enabled`\n"
-        f"`MARKET        XAUUSD`\n"
-        f"`STATUS        Monitoring`\n\n"
-        f"Scanning global markets.\n"
-        f"Filtering institutional-grade opportunities.\n"
-        f"Awaiting confirmed execution conditions."
+        f"🤖 *AurusAI Started*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {now.strftime('%Y-%m-%d %H:%M')} UTC\n"
+        f"📡 Scanning every {SCAN_INTERVAL_MINUTES} minutes\n"
+        f"📊 8 strategies active\n"
+        f"✅ All systems operational\n"
+        f"\\#AurusAI"
     )
-
     send(msg)
-    print("[AurusAI] Startup message sent")
+    print(f"[AurusAI] Startup message sent")
+
 
 # ── main ──────────────────────────────────────────────────────
 if __name__ == "__main__":
