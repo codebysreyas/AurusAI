@@ -167,18 +167,28 @@ def daily_recap():
         print(f"[AurusAI] Daily recap error: {e}")
 
 
-# ── startup ───────────────────────────────────────────────────
 def startup():
     from agents.telegram_agent import send
     now = datetime.now(timezone.utc)
     msg = (
-        f"🤖 *AurusAI Started*\n"
+        f"◉ *AURUS AI*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🕐 {now.strftime('%Y-%m-%d %H:%M')} UTC\n"
-        f"📡 Scanning every {SCAN_INTERVAL_MINUTES} minutes\n"
-        f"📊 8 strategies active\n"
-        f"✅ All systems operational\n"
-        f"\\#AurusAI"
+        f"*SYSTEM INITIALIZED*\n"
+        f"✓ Quantitative Engine Online\n"
+        f"✓ Multi\\-Strategy Framework Active\n"
+        f"✓ Market Data Connected\n"
+        f"✓ Risk Controls Enabled\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 UTC {now.strftime('%Y\\-%m\\-%d %H:%M')}\n"
+        f"📡 SCAN CYCLE      Every {SCAN_INTERVAL_MINUTES} Minutes\n"
+        f"📊 STRATEGIES      8 Active\n"
+        f"🛡️ RISK ENGINE     Enabled\n"
+        f"📈 MARKET          XAUUSD\n"
+        f"🟢 STATUS          Monitoring\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Scanning global markets\\._\n"
+        f"_Filtering institutional\\-grade opportunities\\._\n"
+        f"_Awaiting confirmed execution conditions\\._"
     )
     send(msg)
     print(f"[AurusAI] Startup message sent")
