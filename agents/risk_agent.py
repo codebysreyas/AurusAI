@@ -1,7 +1,3 @@
-# ============================================================
-#  AurusAI — agents/risk_agent.py
-# ============================================================
-
 import sqlite3
 import os
 import sys
@@ -227,7 +223,6 @@ def check_pending_outcomes(current_price):
 def get_current_price():
     try:
         import MetaTrader5 as mt5
-        from config import MT5_SYMBOL if hasattr(__import__('config'), 'MT5_SYMBOL') else None
         symbol = os.environ.get("MT5_SYMBOL", "XAUUSD")
         if not mt5.initialize():
             return None

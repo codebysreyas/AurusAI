@@ -1,8 +1,3 @@
-# ============================================================
-#  AurusAI — agents/price_agent.py
-#  Fetches live XAUUSD from MT5 (Windows EC2)
-# ============================================================
-
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
