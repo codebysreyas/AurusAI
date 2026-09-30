@@ -21,14 +21,18 @@ def format_signal(decision):
     direction_text  = "LONG" if sig.direction == 1 else "SHORT"
 
     # macro line
-    if mac and mac.blackout:
-        macro_line = f"⚠️ Blackout: {mac.blackout_event}"
-    elif mac:
-        macro_icon = "✓" if mac.vote == "agree" else "—"
-        macro_line = (
+        if mac and mac.blackout:
+           macro_line = f"⚠️ Blackout: {mac.blackout_event}"
+        elif mac:
+           macro_icon = "✓" if mac.vote == "agree" else "—"
+           macro_line = (
             f"{macro_icon} DXY {mac.dxy_trend.upper()} │ "
             f"Yields {mac.yield_trend.upper()} │ "
-            f"Curve {mac.yield_curve.upper()}"
+            f"Silver {mac.silver_trend.upper()} │ "
+            f"Crude {mac.crude_trend.upper()} │ "
+            f"VIX {mac.vix_level.upper()} │ "
+            f"SP500 {mac.sp500_trend.upper()}\n"
+            f"📊 {mac.bullish_points}B / {mac.bearish_points}Be"
         )
     else:
         macro_line = "— Macro data unavailable"
